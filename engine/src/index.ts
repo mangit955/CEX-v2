@@ -1,6 +1,13 @@
 import "dotenv/config";
 import { createClient } from "redis";
 import { env } from "./utils/env.js";
+import {
+  cancleOrder,
+  createOrder,
+  getDepth,
+  getOrder,
+  getUserBalance,
+} from "./utils/exchange-engine.js";
 
 export type EngineCommandType =
   | "create_order"
@@ -23,30 +30,26 @@ export interface EngineResponse {
   error?: string;
 }
 
-const brokerClient = createClient({ url: env.redisUrl }).on("error", (error) => {
-  console.error("Redis broker client error", error);
-});
+const brokerClient = createClient({ url: env.redisUrl }).on(
+  "error",
+  (error) => {
+    console.error("Redis broker client error", error);
+  },
+);
 
-const responseClient = createClient({ url: env.redisUrl }).on("error", (error) => {
-  console.error("Redis response client error", error);
-});
+const responseClient = createClient({ url: env.redisUrl }).on(
+  "error",
+  (error) => {
+    console.error("Redis response client error", error);
+  },
+);
 
 await Promise.all([brokerClient.connect(), responseClient.connect()]);
 
-// :-)) I added this just to check the flow, remove it when you start
-const DUMMY_SELL_ORDER = {
-  orderId: "dummy-sell-order-1",
-  userId: "dummy-seller",
-  type: "limit",
-  side: "sell",
-  symbol: "BTC",
-  price: 100,
-  qty: 1,
-  filledQty: 0,
-  status: "open",
-};
-
-async function sendResponse(responseQueue: string, response: EngineResponse): Promise<void> {
+async function sendResponse(
+  responseQueue: string,
+  response: EngineResponse,
+): Promise<void> {
   await responseClient.lPush(responseQueue, JSON.stringify(response));
 }
 
@@ -65,29 +68,30 @@ function handleEngineRequest(message: EngineRequest): unknown {
    * - get_order
    * - cancel_order
    */
+  switch (message.type) {
+    case "create_order": {
+      return createOrder(message.payload as any);
+    }
 
-  // just checking the flow, remove this when you start implementing the logic
-  if (message.type === "create_order") {
-    return {
-      orderId: crypto.randomUUID(),
-      status: "filled",
-      filledQty: DUMMY_SELL_ORDER.qty,
-      averagePrice: DUMMY_SELL_ORDER.price,
-      fills: [
-        {
-          fillId: crypto.randomUUID(),
-          symbol: DUMMY_SELL_ORDER.symbol,
-          price: DUMMY_SELL_ORDER.price,
-          qty: DUMMY_SELL_ORDER.qty,
-          buyOrderId: "request-buy-order",
-          sellOrderId: DUMMY_SELL_ORDER.orderId,
-        },
-      ],
-      note: "Smoke-test response only. Students must replace this with real matching logic.",
-    };
+    case "get_depth": {
+      return getDepth(message.payload.symbol as string);
+    }
+
+    case "get_user_balance": {
+      return getUserBalance(message.payload.userId as string);
+    }
+
+    case "get_order": {
+      return getOrder(message.payload.orderId as string);
+    }
+
+    case "cancel_order": {
+      return cancleOrder(message.payload.orderId as string);
+    }
+
+    default:
+      throw new Error("unsupported_message_type");
   }
-
-  throw new Error("TODO(student): implement this engine request type");
 }
 
 console.log(`Engine listening on Redis queue: ${env.incomingQueue}`);
